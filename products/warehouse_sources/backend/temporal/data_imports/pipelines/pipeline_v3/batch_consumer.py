@@ -49,6 +49,13 @@ class OwnershipLostError(Exception):
     """Raised when the group lease for a (team_id, schema_id) is no longer held by this consumer."""
 
 
+class PermanentBatchApplyError(Exception):
+    """Raise from process_batch for errors retries cannot fix (unsupported batch
+    kind, missing primary keys, malformed batch metadata). The consumer skips
+    the waiting_retry cycle and fails the run on the first attempt — retrying a
+    permanent error only delays the terminal state and burns sink throughput."""
+
+
 @dataclass
 class BatchConsumerConfig:
     """Tuning knobs for the batch consumer."""
@@ -762,7 +769,12 @@ class BatchConsumer:
         status_conn: psycopg.AsyncConnection[Any],
     ) -> None:
         """Write the retry/terminal state after a processing error."""
-        if attempt >= self._config.max_attempts:
+        if attempt >= self._config.max_attempts or isinstance(err, PermanentBatchApplyError):
+            reason = (
+                f"permanent apply error: {err}"
+                if isinstance(err, PermanentBatchApplyError)
+                else f"max retries exceeded: {err}"
+            )
             logger.exception(
                 self._event("batch_failed_no_retries_left"),
                 batch_id=batch.id,
@@ -770,7 +782,7 @@ class BatchConsumer:
                 attempt=attempt,
             )
             capture_exception(err)
-            await self._fail_run(batch, reason=f"max retries exceeded: {err}", conn=lock_conn)
+            await self._fail_run(batch, reason=reason, conn=lock_conn)
         else:
             logger.warning(
                 self._event("batch_failed_will_retry"),
