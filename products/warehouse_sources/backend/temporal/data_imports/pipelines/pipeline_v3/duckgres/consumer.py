@@ -27,7 +27,7 @@ from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline
     sink_eligible_schema_ids as compute_eligible_schema_ids,
 )
 from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline_v3.duckgres.enablement import (
-    duckgres_sink_team_ids,
+    duckgres_sink_enablement,
 )
 from products.warehouse_sources.backend.temporal.data_imports.pipelines.pipeline_v3.duckgres.jobs_db import (
     DuckgresBatchQueue,
@@ -76,6 +76,13 @@ SINK_SUPERSEDED_BATCHES_TOTAL = Gauge(
     "Batches retired because a newer replace-run made their work obsolete (last sweep)",
     multiprocess_mode="livemax",
 )
+SINK_ORGS_AT_BUDGET = Gauge(
+    "duckgres_sink_orgs_at_budget",
+    "Orgs whose live group leases have reached their sink_max_concurrency budget. "
+    "Backlog growing while this is up (and pod utilization is low) means the fleet is "
+    "budget-limited, not pod-limited — raise the org's budget or duckgres capacity, not replicas.",
+    multiprocess_mode="livemax",
+)
 
 
 class DuckgresBatchConsumerAdapter:
@@ -92,6 +99,10 @@ class DuckgresBatchConsumerAdapter:
         # configured group-lease TTL).
         self._lease_ttl_seconds = lease_ttl_seconds
         self._team_ids: list[int] | None = None
+        # (team_id, org_id, sink_max_concurrency) rows for enabled teams —
+        # refreshed with the team set, passed into the claim so the per-org
+        # group budget is enforced fleet-wide. Empty in dev (no caps).
+        self._team_org_budgets: list[tuple[int, str, int]] = []
         self._team_ids_fetched_at: float | None = None
         self._last_maintenance_at = 0.0
         # None = not yet computed; the fetch claims nothing until the first
@@ -110,7 +121,9 @@ class DuckgresBatchConsumerAdapter:
         try:
             first_resolution = self._team_ids_fetched_at is None
             previous = self._team_ids
-            self._team_ids = await sync_to_async(duckgres_sink_team_ids, thread_sensitive=False)()
+            enablement = await sync_to_async(duckgres_sink_enablement, thread_sensitive=False)()
+            self._team_ids = None if enablement is None else enablement.team_ids
+            self._team_org_budgets = [] if enablement is None else enablement.team_org_budgets
             self._team_ids_fetched_at = now
             if first_resolution or self._team_ids != previous:
                 # Only on the first resolution or an actual change — the refresh
@@ -119,6 +132,7 @@ class DuckgresBatchConsumerAdapter:
                     "duckgres_sink_enabled_teams_resolved",
                     first_resolution=first_resolution,
                     team_count=None if self._team_ids is None else len(self._team_ids),
+                    org_count=len({org_id for _, org_id, _ in self._team_org_budgets}),
                 )
         except Exception as e:
             logger.exception("duckgres_sink_enablement_refresh_failed")
@@ -151,6 +165,9 @@ class DuckgresBatchConsumerAdapter:
         SINK_OLDEST_ELIGIBLE_AGE_SECONDS.set(oldest_age or 0.0)
         SINK_BLOCKED_BACKLOG.set(blocked)
         SINK_BLOCKED_OLDEST_AGE_SECONDS.set(blocked_age or 0.0)
+
+        orgs_at_budget = await DuckgresBatchQueue.count_orgs_at_budget(conn, team_org_budgets=self._team_org_budgets)
+        SINK_ORGS_AT_BUDGET.set(orgs_at_budget)
 
         block_list_was_unset = self._blocked_schema_ids is None
         try:
@@ -185,6 +202,7 @@ class DuckgresBatchConsumerAdapter:
             team_count=None if team_ids is None else len(team_ids),
             eligible_backlog=backlog,
             blocked_backlog=blocked,
+            orgs_at_budget=orgs_at_budget,
             blocked_schema_count=None if self._blocked_schema_ids is None else len(self._blocked_schema_ids),
             eligible_schema_count=None if self._eligible_schema_ids is None else len(self._eligible_schema_ids),
         )
@@ -228,6 +246,7 @@ class DuckgresBatchConsumerAdapter:
             lease_ttl_seconds=lease_ttl_seconds,
             max_groups=max_groups,
             exclude_groups=exclude_groups,
+            team_org_budgets=self._team_org_budgets,
         )
 
     async def unlock(
