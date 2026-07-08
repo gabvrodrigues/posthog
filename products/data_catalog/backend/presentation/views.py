@@ -1,7 +1,7 @@
 """DRF views for data_catalog.
 
 Thin: validate via the serializer, call the facade, serialize the result. Domain invariants
-(name reservation, upsert, validation) live in the logic layer behind the facade.
+(name reservation, upsert, validation, drift, approval) live in the logic layer behind the facade.
 """
 
 from django.db.models import QuerySet
@@ -13,6 +13,7 @@ from rest_framework.request import Request
 from rest_framework.response import Response
 
 from posthog.api.routing import TeamAndOrgViewSetMixin
+from posthog.api.utils import action
 
 from ..facade import api
 from ..facade.enums import CreatedSource
@@ -44,6 +45,7 @@ class MetricViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
             display_name=data.get("display_name", ""),
             unit=data.get("unit", ""),
             definition=data.get("definition"),
+            source_insight_short_id=data.get("source_insight_short_id"),
             created_source=data.get("created_source", CreatedSource.USER),
             ai_model=data.get("ai_model", ""),
             confidence=data.get("confidence"),
@@ -64,4 +66,29 @@ class MetricViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         return Response(self.get_serializer(metric).data)
 
     def perform_destroy(self, instance: Metric) -> None:
-        api.soft_delete_metric(instance)
+        api.soft_delete_metric(instance, self.request.user)
+
+    @action(
+        detail=True,
+        methods=["POST"],
+        required_scopes=["data_catalog_approval:write"],
+        request=None,
+        responses={200: MetricSerializer},
+    )
+    def approve(self, request: Request, **kwargs) -> Response:
+        """Bless a metric as canonical. Returns 409 while the metric is drifted from its insight."""
+        metric = api.approve_metric(self.get_object(), request.user)
+        return Response(self.get_serializer(metric).data)
+
+    @action(
+        detail=True,
+        methods=["POST"],
+        url_path="refresh_from_insight",
+        required_scopes=["data_catalog:write"],
+        request=None,
+        responses={200: MetricSerializer},
+    )
+    def refresh_from_insight(self, request: Request, **kwargs) -> Response:
+        """Re-snapshot the linked insight's current query into the definition."""
+        metric = api.refresh_metric_from_insight(self.get_object(), request.user)
+        return Response(self.get_serializer(metric).data)
