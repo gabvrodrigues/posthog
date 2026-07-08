@@ -6,8 +6,9 @@ Thin: validate via the serializer, call the facade, serialize the result. Domain
 
 from django.db.models import QuerySet
 
-from drf_spectacular.utils import extend_schema
-from rest_framework import status, viewsets
+from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import OpenApiParameter, extend_schema
+from rest_framework import mixins, status, viewsets
 from rest_framework.exceptions import ValidationError
 from rest_framework.request import Request
 from rest_framework.response import Response
@@ -18,13 +19,15 @@ from posthog.utils import refresh_requested_by_client
 
 from ..facade import api
 from ..facade.enums import CreatedSource
-from ..facade.models import Metric, TableCertification
+from ..facade.models import Metric, RelationshipProposal, TableCertification
 from .serializers import (
     CertificationCreateSerializer,
     CertificationSerializer,
     MetricRunRequestSerializer,
     MetricRunResponseSerializer,
     MetricSerializer,
+    RelationshipProposalSerializer,
+    RelationshipRejectSerializer,
 )
 
 
@@ -165,3 +168,68 @@ class CertificationViewSet(TeamAndOrgViewSetMixin, viewsets.ModelViewSet):
         """Mark the target as deprecated (avoid this source)."""
         cert = api.deprecate(self.get_object(), request.user)
         return Response(CertificationSerializer(cert).data)
+
+
+class RelationshipProposalViewSet(
+    TeamAndOrgViewSetMixin,
+    mixins.ListModelMixin,
+    mixins.RetrieveModelMixin,
+    mixins.CreateModelMixin,
+    viewsets.GenericViewSet,
+):
+    """Reviewed join facts. Accepting one promotes it to a real DataWarehouseJoin; rejections persist."""
+
+    scope_object = "data_catalog"
+    serializer_class = RelationshipProposalSerializer
+    queryset = RelationshipProposal.objects.unscoped()
+
+    def safely_get_queryset(self, queryset: QuerySet[RelationshipProposal]) -> QuerySet[RelationshipProposal]:
+        proposals = api.relationships_for_team(self.team)
+        status_filter = self.request.query_params.get("status")
+        return proposals.filter(status=status_filter) if status_filter else proposals
+
+    @extend_schema(
+        parameters=[OpenApiParameter("status", OpenApiTypes.STR, description="Filter by proposed/accepted/rejected.")]
+    )
+    def list(self, request: Request, *args, **kwargs) -> Response:
+        return super().list(request, *args, **kwargs)
+
+    def create(self, request: Request, *args, **kwargs) -> Response:
+        serializer = self.get_serializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        proposal = api.propose_relationship(
+            team=self.team,
+            user=request.user,
+            source_table_name=data["source_table_name"],
+            source_table_key=data["source_table_key"],
+            joining_table_name=data["joining_table_name"],
+            joining_table_key=data["joining_table_key"],
+            field_name=data["field_name"],
+            configuration=data.get("configuration"),
+            confidence=data.get("confidence"),
+            reasoning=data.get("reasoning", ""),
+            evidence=data.get("evidence"),
+        )
+        return Response(self.get_serializer(proposal).data, status=status.HTTP_201_CREATED)
+
+    @action(
+        detail=True,
+        methods=["POST"],
+        required_scopes=["data_catalog_approval:write"],
+        request=None,
+        responses={200: RelationshipProposalSerializer},
+    )
+    def accept(self, request: Request, **kwargs) -> Response:
+        """Promote the proposal to a real warehouse join after re-validating and probing it."""
+        proposal = api.accept_proposal(self.get_object(), request.user)
+        return Response(self.get_serializer(proposal).data)
+
+    @extend_schema(request=RelationshipRejectSerializer, responses={200: RelationshipProposalSerializer})
+    @action(detail=True, methods=["POST"], required_scopes=["data_catalog_approval:write"])
+    def reject(self, request: Request, **kwargs) -> Response:
+        """Reject the proposal. Persists forever so the pair is never re-proposed."""
+        body = RelationshipRejectSerializer(data=request.data)
+        body.is_valid(raise_exception=True)
+        proposal = api.reject_proposal(self.get_object(), request.user, body.validated_data.get("rejection_reason", ""))
+        return Response(self.get_serializer(proposal).data)
