@@ -157,17 +157,6 @@ export const CreatedSourceEnumApi = {
 } as const
 
 /**
- * * `user` - user
- * * `ai_generated` - ai_generated
- */
-export type CreatedSourceEnumApi = (typeof CreatedSourceEnumApi)[keyof typeof CreatedSourceEnumApi]
-
-export const CreatedSourceEnumApi = {
-    User: 'user',
-    AiGenerated: 'ai_generated',
-} as const
-
-/**
  * Machine-readable query. Omit for a name+description-only stub. Stored upgrade-canonical.
  * @nullable
  */

@@ -183,14 +183,11 @@ export const getDataCatalogCertificationsCertifyCreateUrl = (projectId: string, 
 export const dataCatalogCertificationsCertifyCreate = async (
     projectId: string,
     id: string,
-    dataCatalogCertificationApi?: NonReadonly<DataCatalogCertificationApi>,
     options?: RequestInit
 ): Promise<DataCatalogCertificationApi> => {
     return apiMutator<DataCatalogCertificationApi>(getDataCatalogCertificationsCertifyCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataCatalogCertificationApi),
     })
 }
 
@@ -204,14 +201,11 @@ export const getDataCatalogCertificationsDeprecateCreateUrl = (projectId: string
 export const dataCatalogCertificationsDeprecateCreate = async (
     projectId: string,
     id: string,
-    dataCatalogCertificationApi?: NonReadonly<DataCatalogCertificationApi>,
     options?: RequestInit
 ): Promise<DataCatalogCertificationApi> => {
     return apiMutator<DataCatalogCertificationApi>(getDataCatalogCertificationsDeprecateCreateUrl(projectId, id), {
         ...options,
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', ...options?.headers },
-        body: JSON.stringify(dataCatalogCertificationApi),
     })
 }
 

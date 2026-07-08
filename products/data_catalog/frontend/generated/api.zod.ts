@@ -37,20 +37,6 @@ export const DataCatalogCertificationsPartialUpdateBody = /* @__PURE__ */ zod.ob
 })
 
 /**
- * Mark the target as certified (prefer this source).
- */
-export const DataCatalogCertificationsCertifyCreateBody = /* @__PURE__ */ zod.object({
-    notes: zod.string().optional().describe("Why this mark exists, e.g. 'canonical MRR source'."),
-})
-
-/**
- * Mark the target as deprecated (avoid this source).
- */
-export const DataCatalogCertificationsDeprecateCreateBody = /* @__PURE__ */ zod.object({
-    notes: zod.string().optional().describe("Why this mark exists, e.g. 'canonical MRR source'."),
-})
-
-/**
  * Create a metric, or refine the one already holding this name for the team.
  */
 export const dataCatalogMetricsCreateBodyNameMax = 128
