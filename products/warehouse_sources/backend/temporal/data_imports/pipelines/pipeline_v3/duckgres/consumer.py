@@ -400,6 +400,14 @@ class DuckgresBatchConsumerAdapter:
         if not batch.is_final_batch:
             await DuckgresBatchQueue.mark_applied(conn, batch=batch)
 
+    def is_retryable_error(self, err: Exception) -> bool:
+        # Permanent apply errors (unsupported batch kind, missing/absent primary
+        # keys, malformed backfill metadata) are deterministic: every attempt
+        # repeats the same outcome, so the shared engine fails the run on the
+        # first attempt instead of burning the retry cycle. All other duckgres
+        # failures (connection, S3, transient DuckLake conflicts) stay retryable.
+        return not isinstance(err, PermanentBatchApplyError)
+
 
 class DuckgresBatchConsumer(SharedBatchConsumer):
     """The shared engine plus the sink's lease-safety overrides, kept out of the
@@ -495,7 +503,7 @@ class DuckgresBatchConsumer(SharedBatchConsumer):
             )
             raise
         await super()._handle_batch_failure(batch, attempt, err, lock_conn=lock_conn, status_conn=status_conn)
-        if (attempt >= self._config.max_attempts or isinstance(err, PermanentBatchApplyError)) and not (
+        if (not self._adapter.is_retryable_error(err) or attempt >= self._config.max_attempts) and not (
             is_backfill_metadata(batch.metadata)
         ):
             # Terminal failure of a LIVE run: earlier batches applied, the rest

@@ -664,7 +664,9 @@ class TestPermanentApplyErrors:
             await consumer._process_single(_make_batch(latest_attempt=0), lock_conn=_make_healthy_conn())
 
         mock_fail.assert_called_once()
-        assert "permanent" in mock_fail.call_args.kwargs.get(
+        # The raw error is the customer-visible latest_error: the non-retryable
+        # path fails the run with the unwrapped message, not a "max retries" wrap.
+        assert "unsupported sync type" in mock_fail.call_args.kwargs.get(
             "reason", mock_fail.call_args.args[1] if len(mock_fail.call_args.args) > 1 else ""
         )
         assert SourceBatchDuckgresStatus.State.WAITING_RETRY not in states
