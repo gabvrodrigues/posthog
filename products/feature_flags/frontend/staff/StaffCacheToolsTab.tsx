@@ -1,18 +1,11 @@
 import { useActions, useValues } from 'kea'
 
 import { IconEye } from '@posthog/icons'
-import {
-    LemonBanner,
-    LemonButton,
-    LemonDialog,
-    LemonProgress,
-    LemonTable,
-    LemonTableColumns,
-    LemonTag,
-} from '@posthog/lemon-ui'
+import { LemonBanner, LemonButton, LemonDialog, LemonTable, LemonTableColumns, LemonTag } from '@posthog/lemon-ui'
 
 import { CopyToClipboardInline } from 'lib/components/CopyToClipboard'
 import { TZLabel } from 'lib/components/TZLabel'
+import { LemonProgress } from 'lib/lemon-ui/LemonProgress'
 import { truncate } from 'lib/utils/strings'
 
 import {
