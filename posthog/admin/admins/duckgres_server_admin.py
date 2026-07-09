@@ -22,6 +22,7 @@ class DuckgresServerAdmin(admin.ModelAdmin):
         "port",
         "flight_port",
         "database",
+        "sink_max_concurrency",
         "bucket",
         "created_at",
         "updated_at",
@@ -54,6 +55,12 @@ class DuckgresServerAdmin(admin.ModelAdmin):
             "DuckLake catalog connection",
             {
                 "fields": ("catalog_host", "catalog_port", "catalog_database", "catalog_username"),
+            },
+        ),
+        (
+            "Sink capacity",
+            {
+                "fields": ("sink_max_concurrency",),
             },
         ),
         (
@@ -90,6 +97,12 @@ class DuckgresServerAdmin(admin.ModelAdmin):
             "DuckLake catalog connection",
             {
                 "fields": ("catalog_host", "catalog_port", "catalog_database", "catalog_username", "catalog_password"),
+            },
+        ),
+        (
+            "Sink capacity",
+            {
+                "fields": ("sink_max_concurrency",),
             },
         ),
         (

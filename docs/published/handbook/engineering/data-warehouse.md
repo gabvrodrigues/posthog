@@ -36,6 +36,10 @@ AWS_ACCESS_KEY_ID=object_storage_root_user AWS_SECRET_ACCESS_KEY=object_storage_
 
 There's a separate folder under the `data-warehouse` bucket for each table you sync.
 
+## Tuning Duckgres sink capacity
+
+Each managed warehouse has a fleet-wide `sink_max_concurrency` budget that limits how many schema groups the Duckgres batch sink can process for its organization at once. Staff can change the value on the warehouse's `DuckgresServer` page in Django admin. Use a positive value, and raise it only when the warehouse has enough connection capacity.
+
 ## Setting up a MySQL source
 
 If you want to set up a local MySQL database as a source for the data warehouse, there are a few extra set up steps you'll need to complete:

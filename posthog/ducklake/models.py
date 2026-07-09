@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from django.core.validators import MinValueValidator
 from django.db import models
 
 from posthog.helpers.encrypted_fields import EncryptedTextField
@@ -51,7 +52,7 @@ class DuckgresServer(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
     # org — each in-flight group holds at most one connection to the org's
     # duckgres server, so this bounds the sink's connection footprint no matter
     # how many consumer pods run. Soft cap: enforced at group-claim time.
-    sink_max_concurrency = models.IntegerField(default=4)
+    sink_max_concurrency = models.IntegerField(default=4, validators=[MinValueValidator(1)])
 
     class Meta:
         db_table = "posthog_duckgresserver"
@@ -157,6 +158,13 @@ class DuckgresSinkSchemaState(CreatedMetaFields, UpdatedMetaFields, UUIDModel):
     chunk_count = models.IntegerField(null=True, blank=True)
     chunks_applied = models.IntegerField(default=0)
     last_error = models.TextField(null=True, blank=True)
+    # Failure streak since the last forward progress. Drives planner retry
+    # backoff and the failing-schema classification that splits these schemas'
+    # backlog out of the pageable blocked gauges. Reset on any progress.
+    consecutive_failures = models.IntegerField(default=0)
+    # When the current failure streak began — the durable "backfill owed since"
+    # anchor. Unlike batch-derived gauges it survives queue retention.
+    first_failed_at = models.DateTimeField(null=True, blank=True)
     # Override CreatedMetaFields.created_by to drop the DB-level FK: a real
     # constraint on posthog_user takes a lock on that hot table when this table
     # is created (HotTableAlterPolicy). App-level enforcement is enough for an

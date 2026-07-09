@@ -80,6 +80,7 @@ class TestDuckgresServerAdminProvision(BaseTest):
         }
 
         assert "username" in field_names
+        assert "sink_max_concurrency" in field_names
         assert "password" not in field_names
 
     def test_provision_post_calls_managed_warehouse_bypassing_flag(self) -> None:
