@@ -441,6 +441,9 @@ class _Introspection:
         self.views = set(database.get_view_names())
         self.row_counts, self.view_row_counts, self.column_stats = _warehouse_metadata(context.team_id)
         self.table_descriptions = TableDescriptions.load(context.team_id)
+        self.certifications = _catalog_certifications(context.team_id)
+        self.proposed_relationships = _catalog_proposed_relationships(context.team_id)
+        self.accepted_relationships = _catalog_accepted_relationships(context.team_id)
         # Resolved `SELECT * FROM <table>` scope per table, so expression columns can be typed without
         # re-resolving the table once per expression.
         self._table_scope_cache: dict[str, Optional[ast.SelectQueryType]] = {}
@@ -527,9 +530,29 @@ class _Introspection:
 
             table_type, table_schema = _classify_table(name, table, self.warehouse, self.views)
             row_count = self._row_count(name, table, table_type)
-            table_rows.append([name, table_schema, name, table_type, self._table_description(table), row_count])
+            certification = self.certifications.get(name)
+            table_rows.append(
+                [name, table_schema, name, table_type, self._table_description(table), row_count, certification]
+            )
 
             self._collect_fields(name, table_schema, table_type, table, table.fields, column_rows, relationship_rows)
+
+        for proposal in self.proposed_relationships:
+            if self.allowed_tables is not None and proposal["source_table"] not in self.allowed_tables:
+                continue
+            relationship_rows.append(
+                [
+                    proposal["source_table"],
+                    proposal["source_column"],
+                    proposal["target_table"],
+                    proposal["target_column"],
+                    "proposed_join",
+                    None,
+                    proposal["status"],
+                    proposal["confidence"],
+                    proposal["reasoning"],
+                ]
+            )
 
         return table_rows, column_rows, relationship_rows
 
@@ -575,6 +598,10 @@ class _Introspection:
                 ordinal += 1
             elif isinstance(field, LazyJoin):
                 target = field.join_table if isinstance(field.join_table, str) else (field.join_table.name or "")
+                # An accepted relationship proposal is promoted into a real join keyed by its unique
+                # accessor (field_name); surface its confidence/reasoning on that row so consumers see
+                # the reviewed provenance. Built-in joins stay null.
+                confidence, reasoning = self.accepted_relationships.get((table_name, field_name), (None, None))
                 relationship_rows.append(
                     [
                         table_name,
@@ -583,6 +610,9 @@ class _Introspection:
                         ".".join(str(x) for x in field.to_field) if field.to_field else None,
                         "lazy_join",
                         field.resolver,
+                        "active",
+                        confidence,
+                        reasoning,
                     ]
                 )
             elif isinstance(field, FieldTraverser):
@@ -593,6 +623,9 @@ class _Introspection:
                         table_name,
                         ".".join(str(x) for x in field.chain),
                         "field_traverser",
+                        None,
+                        "active",
+                        None,
                         None,
                     ]
                 )
@@ -660,6 +693,7 @@ _TABLES_COLUMNS: list[tuple[str, str]] = [
     ("table_type", _STRING),
     ("description", _NULLABLE_STRING),
     ("row_count", _NULLABLE_INTEGER),
+    ("certification", _NULLABLE_STRING),
 ]
 
 _COLUMNS_COLUMNS: list[tuple[str, str]] = [
@@ -684,6 +718,9 @@ _RELATIONSHIPS_COLUMNS: list[tuple[str, str]] = [
     ("target_column", _NULLABLE_STRING),
     ("relationship_kind", _STRING),
     ("via", _NULLABLE_STRING),
+    ("status", _STRING),
+    ("confidence", _NULLABLE_FLOAT),
+    ("reasoning", _NULLABLE_STRING),
 ]
 
 _DATA_TYPES: list[tuple[str, str]] = [
@@ -774,6 +811,83 @@ def _catalog_metrics(context: "HogQLContext", allowed: Optional[frozenset[str]])
         return []
 
 
+def _catalog_certifications(team_id: Optional[int]) -> dict[str, str]:
+    """Map each certified/deprecated table or view name to its certification status (fail-soft).
+
+    Certifications live directly on the table/view, so no backing-table remap is needed. Soft-deleted
+    targets are excluded (their marks read as absent).
+    """
+    if team_id is None:
+        return {}
+    from products.data_catalog.backend.facade.models import TableCertification  # noqa: PLC0415
+
+    try:
+        result: dict[str, str] = {}
+        certs = TableCertification.objects.for_team(team_id)
+        for name, status in (
+            certs.filter(table__isnull=False).exclude(table__deleted=True).values_list("table__name", "status")
+        ):
+            result[name] = status
+        for name, status in (
+            certs.filter(saved_query__isnull=False)
+            .exclude(saved_query__deleted=True)
+            .values_list("saved_query__name", "status")
+        ):
+            result[name] = status
+        return result
+    except Exception:
+        logger.exception("information_schema: failed to load certifications", team_id=team_id)
+        return {}
+
+
+def _catalog_proposed_relationships(team_id: Optional[int]) -> list[dict[str, Any]]:
+    """Proposed/rejected relationship proposals, surfaced as proposed_join rows (fail-soft).
+
+    Accepted proposals are not returned here: they already exist as real lazy_join rows, enriched with
+    their confidence/reasoning via `_catalog_accepted_relationships`.
+    """
+    if team_id is None:
+        return []
+    from products.data_catalog.backend.facade.models import RelationshipProposal  # noqa: PLC0415
+
+    try:
+        return [
+            {
+                "source_table": proposal.source_table_name,
+                "source_column": proposal.source_table_key,
+                "target_table": proposal.joining_table_name,
+                "target_column": proposal.joining_table_key,
+                "status": proposal.status,
+                "confidence": proposal.confidence,
+                "reasoning": proposal.reasoning or None,
+            }
+            for proposal in RelationshipProposal.objects.for_team(team_id).exclude(status="accepted")
+        ]
+    except Exception:
+        logger.exception("information_schema: failed to load relationship proposals", team_id=team_id)
+        return []
+
+
+def _catalog_accepted_relationships(
+    team_id: Optional[int],
+) -> dict[tuple[str, str], tuple[Optional[float], Optional[str]]]:
+    """Accepted proposals keyed by (source_table, join accessor), so their confidence/reasoning can
+    enrich the real lazy_join rows they were promoted into (fail-soft). The accessor (`field_name`) is
+    unique per table, so the match is exact and never collides with a built-in join."""
+    if team_id is None:
+        return {}
+    from products.data_catalog.backend.facade.models import RelationshipProposal  # noqa: PLC0415
+
+    try:
+        return {
+            (proposal.source_table_name, proposal.field_name): (proposal.confidence, proposal.reasoning or None)
+            for proposal in RelationshipProposal.objects.for_team(team_id).filter(status="accepted")
+        }
+    except Exception:
+        logger.exception("information_schema: failed to load accepted relationships", team_id=team_id)
+        return {}
+
+
 def _string_field(name: str, nullable: bool = False, description: Optional[str] = None) -> StringDatabaseField:
     return StringDatabaseField(name=name, nullable=nullable, description=description)
 
@@ -807,6 +921,11 @@ class InformationSchemaTablesTable(LazyTable):
             name="row_count",
             nullable=True,
             description="Approximate row count; only populated for data warehouse tables and views, NULL otherwise.",
+        ),
+        "certification": _string_field(
+            "certification",
+            nullable=True,
+            description="Trust mark: 'certified' (prefer this source), 'deprecated' (avoid it), or NULL (unmarked).",
         ),
     }
 
@@ -903,8 +1022,9 @@ class InformationSchemaColumnsTable(LazyTable):
 
 class InformationSchemaRelationshipsTable(LazyTable):
     description: str = (
-        "Joinable relationships between tables (lazy joins and field traversers); one row per "
-        "relationship. Use it to discover how to join from one table to another in HogQL."
+        "Joinable relationships between tables; one row per relationship. Active joins (lazy_join / "
+        "field_traverser) plus reviewed catalog join proposals (relationship_kind='proposed_join'). "
+        "Prefer an active or accepted join; a 'rejected' proposal was reviewed and should not be used."
     )
     fields: dict[str, FieldOrTable] = {
         "source_table": _string_field(
@@ -918,10 +1038,23 @@ class InformationSchemaRelationshipsTable(LazyTable):
             "target_column", nullable=True, description="Column (or field path) on the target table that is joined to."
         ),
         "relationship_kind": _string_field(
-            "relationship_kind", nullable=False, description="Kind of relationship: 'lazy_join' or 'field_traverser'."
+            "relationship_kind",
+            nullable=False,
+            description="'lazy_join', 'field_traverser', or 'proposed_join' (a reviewed catalog proposal).",
         ),
         "via": _string_field(
-            "via", nullable=True, description="Internal resolver backing a lazy join, NULL for field traversers."
+            "via", nullable=True, description="Internal resolver backing a lazy join, NULL otherwise."
+        ),
+        "status": _string_field(
+            "status",
+            nullable=False,
+            description="'active' for real joins; 'proposed'/'rejected' for catalog proposals not yet promoted.",
+        ),
+        "confidence": FloatDatabaseField(
+            name="confidence", nullable=True, description="Discovery confidence for a proposed join, 0-1."
+        ),
+        "reasoning": _string_field(
+            "reasoning", nullable=True, description="Why a join was proposed (proposed_join rows only)."
         ),
     }
 

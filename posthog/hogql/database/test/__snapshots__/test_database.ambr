@@ -6108,6 +6108,16 @@
                   "schema_valid": true,
                   "table": null,
                   "type": "integer"
+              },
+              "certification": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "certification",
+                  "id": null,
+                  "name": "certification",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
               }
           },
           "id": "system.information_schema.tables",
@@ -6301,6 +6311,36 @@
                   "hogql_value": "via",
                   "id": null,
                   "name": "via",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
+              },
+              "status": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "status",
+                  "id": null,
+                  "name": "status",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
+              },
+              "confidence": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "confidence",
+                  "id": null,
+                  "name": "confidence",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "float"
+              },
+              "reasoning": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "reasoning",
+                  "id": null,
+                  "name": "reasoning",
                   "schema_valid": true,
                   "table": null,
                   "type": "string"
@@ -15021,6 +15061,16 @@
                   "schema_valid": true,
                   "table": null,
                   "type": "integer"
+              },
+              "certification": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "certification",
+                  "id": null,
+                  "name": "certification",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
               }
           },
           "id": "system.information_schema.tables",
@@ -15214,6 +15264,36 @@
                   "hogql_value": "via",
                   "id": null,
                   "name": "via",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
+              },
+              "status": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "status",
+                  "id": null,
+                  "name": "status",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "string"
+              },
+              "confidence": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "confidence",
+                  "id": null,
+                  "name": "confidence",
+                  "schema_valid": true,
+                  "table": null,
+                  "type": "float"
+              },
+              "reasoning": {
+                  "chain": null,
+                  "fields": null,
+                  "hogql_value": "reasoning",
+                  "id": null,
+                  "name": "reasoning",
                   "schema_valid": true,
                   "table": null,
                   "type": "string"
