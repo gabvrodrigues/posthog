@@ -10,7 +10,6 @@ import {
     KeyboardEvent,
     MouseEvent as ReactMouseEvent,
     Suspense,
-    lazy,
     useCallback,
     useEffect,
     useId,
@@ -24,9 +23,12 @@ import { IconCode, IconComment, IconDrag } from '@posthog/icons'
 import { LemonButton } from '@posthog/lemon-ui'
 
 import { Spinner } from 'lib/lemon-ui/Spinner'
+import { lazyWithRetry } from 'lib/utils/lazyWithRetry'
 
 // Monaco is heavy, so the markdown source editor only loads when the source drawer opens.
-const LazyCodeEditor = lazy(() => import('lib/monaco/CodeEditor').then((module) => ({ default: module.CodeEditor })))
+const LazyCodeEditor = lazyWithRetry(() =>
+    import('lib/monaco/CodeEditor').then((module) => ({ default: module.CodeEditor }))
+)
 
 import { mergeNotebookMarkdownChanges } from './collaboration'
 import {
